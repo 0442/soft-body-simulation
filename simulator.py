@@ -4,8 +4,14 @@ from time import sleep, time
 from math import sqrt
 from collections import namedtuple
 from functools import reduce
+import numpy
 
 from decimal import *
+
+# TODO
+# - do calculations with fixed point accuracy
+# - bug: spinning objects start gaining speed infinitely
+# - air resistance
 
 class PhysConsts:
     grav_constant = 6.674 * 10**(-10)
@@ -14,7 +20,6 @@ class PhysConsts:
     time_step = 0.005
 
     decimal_precision = 3
-
 
 class Utils:
     def vector_magnitude(vector:tuple[int]) -> float:
@@ -31,20 +36,49 @@ class Utils:
         return sign
 
     def vector_sum(vect1:tuple[int|float], vect2:tuple[int|float]):
-        vect1, vect2 = list(vect1), list(vect2)
-        if len(vect2) > len(vect1):
-            vect1, vect2 = vect2, vect1
+        v1, v2 = list(vect1), list(vect2)
+        if len(v2) > len(v1):
+            v1, v2 = v2, v1
 
-        for i in range(len(vect2)):
-            vect1[i] += vect2[i]
+        for i in range(len(v2)):
+            v1[i] += v2[i]
 
-        return tuple(vect1)
+        return tuple(v1)
+
+    def vector_sub(vect1:tuple[int|float], vect2:tuple[int|float]):
+        v1, v2 = list(vect1), list(vect2)
+        if len(v2) > len(v1):
+            v1, v2 = v2, v1
+
+        for i in range(len(v2)):
+            v1[i] -= v2[i]
+
+        return tuple(v1)
+
+    def vector_len(vector:tuple[float]):
+        v = list(vector)
+        s = reduce(lambda s,i: s+i**2, v, 0) ** (1/2)
+        return s
+
+    def unit_vec(vector:tuple[float]):
+        m = 1 / Utils.vector_len(vector)
+        n = []
+        for i in vector:
+            n.append(i * m)
+        return n
+
+    def scale_vector(vector:tuple[float], scalar:float):
+        v = list(vector)
+        n = []
+        for i in v:
+            n.append(i * scalar)
+        return n
 
 
 class Node:
     """ Represents a point mass.
     """
-    def __init__(self, x:int, y:int, mass:int) -> 'Node':
+    def __init__(self, x:float, y:float, mass:float) -> 'Node':
         self.i = None
         self.__mass = mass
 
@@ -54,19 +88,19 @@ class Node:
 
         self.__forces = {}
 
-    def update_force(self, identifier, vector:tuple[int]):
+    def update_force(self, identifier, vector:tuple[float,float]):
         self.__forces[identifier] = vector
 
     def remove_force(self, identifier):
         self.__forces.pop(identifier)
 
-    def set_velocity(self, velocity_vector:tuple[int]):
+    def set_velocity(self, velocity_vector:tuple[float,float]):
         self.__velocity = velocity_vector
 
-    def set_acceleration(self, acceleration_vector:tuple[int]):
+    def set_acceleration(self, acceleration_vector:tuple[float,float]):
         self.__acceleration = acceleration_vector
 
-    def set_position(self, position_vector:tuple[int]):
+    def set_position(self, position_vector:tuple[float,float]):
         self.__position = position_vector
 
     def force_sum(self):
@@ -120,7 +154,7 @@ class Node:
         return self.__mass
 
 class Edge:
-    def __init__(self, node1:Node, node2:Node, spring_const:int, damping_const:int, rest_length:int) -> 'Edge':
+    def __init__(self, node1:Node, node2:Node, spring_const:float, damping_const:float, rest_length:float) -> 'Edge':
         self.__node1 = node1
         self.__node2 = node2
 
@@ -140,8 +174,10 @@ class Edge:
 
         self.__deformation = spring_length - self.__rest_length
 
-    def calculate_force_vectors(self):
-        """Calculates and returns the spring force vectors based on current states of nodes
+    def calculate_spring_force(self):
+        """Returns the spring force vectors based on current states of nodes
+
+        Calculated based on current state of edge and nodes
         """
         self.update_deformation()
         magnitude = self.__deformation * self.__spring_const
@@ -165,21 +201,32 @@ class Edge:
         return force_vect_1, force_vect_2
 
     def calculate_damping_vectors(self):
-        """Calculates and returns velocity vectors for damping the springing between nodes.
+        """Returns velocity vectors for damping the springing between nodes.
+
+        Calculated based on current state of edge and nodes
         """
         vel1 = self.__node1.velocity
         vel2 = self.__node2.velocity
 
-        # movement relative to the other node * damping coeff
-        damp_vel1 = (
-            (vel2[0] - vel1[0]) * self.__damping_const,
-            (vel2[1] - vel1[1]) * self.__damping_const,
-        )
+        relative_pos1 = Utils.unit_vec(Utils.vector_sub(self.__node2.position, self.__node1.position))
+        relative_pos2 = Utils.unit_vec(Utils.vector_sub(self.__node1.position, self.__node2.position))
 
-        damp_vel2 = (
-            (vel1[0] - vel2[0]) * self.__damping_const,
-            (vel1[1] - vel2[1]) * self.__damping_const,
-        )
+        relative_vel1 = Utils.vector_sub(vel2, vel1)
+        relative_vel2 = Utils.vector_sub(vel1, vel2)
+
+        d1 = numpy.dot(relative_pos1, relative_vel1)
+        d1 = numpy.dot(relative_pos2, relative_vel2)
+        damp_vel1 = Utils.scale_vector(relative_pos1, d1 * self.__damping_const)
+        damp_vel2 = Utils.scale_vector(damp_vel1, -1)
+
+        f1, f2 = self.calculate_spring_force()
+        angle1 = numpy.arccos(numpy.dot(f1,damp_vel1) / (Utils.vector_len(f1) * Utils.vector_len(damp_vel1)))
+        angle2 = numpy.arccos(numpy.dot(f2,damp_vel2) / (Utils.vector_len(f2) * Utils.vector_len(damp_vel2)))
+        if angle1 > 1:
+            damp_vel1 = (0,0)
+        if angle2 > 1:
+            damp_vel2 = (0,0)
+
 
         return damp_vel1, damp_vel2
 
@@ -254,7 +301,7 @@ class SoftBody:
         self.__edges.append(edge)
 
     def add_external_force(self, name:str, force_vector:tuple):
-        """Adds an external force that acts on all the nodes equally.
+        """Adds a force that acts on all the nodes equally all the time.
 
         Raises ValueError if a force with given name already exits.
         """
@@ -263,7 +310,7 @@ class SoftBody:
 
         self.__external_forces[name] = force_vector
 
-    def advance_physics(self, time_step:int):
+    def advance_physics(self):
         """Calculate new states for Nodes for the next time step.
         """
         # springs/edges
@@ -282,7 +329,7 @@ class SoftBody:
             if abs(edge.deformation) > self.__edge_deform_deform:
                 edge.set_rest_length(edge.rest_length + edge.deformation)
 
-            force1, force2 = edge.calculate_force_vectors()
+            force1, force2 = edge.calculate_spring_force()
 
             node1.update_force(edge, force1)
             node2.update_force(edge, force2)
@@ -300,8 +347,6 @@ class SoftBody:
                 node.update_force(name, force)
 
             node.update_state()
-
-
 
     def add_velocity(self, vector:tuple[float]):
         """Add velocity for every node, changing the whole body's movement.
@@ -362,13 +407,16 @@ class Simulation:
     def __init__(self, bounce_damping:float=0.8, friction_coeff:float=0.5) -> None:
         self.__bg_color = (33,29,27)
         self.__node_color = (235,235,235)
-        self.__node_r = 0.06
+        self.__node_r = 0.07
         self.__edge_w = 0.03
 
         self.__bounce_damping = bounce_damping
         self.__friction_coeff = friction_coeff
 
         self.__is_paused = False
+        self.__is_dragging = False
+        self.__dragged_node = None
+        self.__highlighted_node = None
         self.__time_scale = 1
 
         self.__disp_size_pixels = (700,700)
@@ -394,10 +442,6 @@ class Simulation:
                 # floor
                 if y > disp_h:
                     friction = (-Utils.num_sign(v[0]) * node.force_sum()[1]* self.__friction_coeff, 0)
-                    if abs(v[0]) < 0.5:
-                        friction = (0,0)
-                        v = (0,v[1])
-
                     node.set_velocity((
                         v[0],
                         v[1] * self.__bounce_damping * -1
@@ -409,10 +453,6 @@ class Simulation:
                 # ceiling
                 elif y < 0:
                     friction = (-Utils.num_sign(v[0]) * node.force_sum()[1] * self.__friction_coeff, 0)
-                    if abs(v[0]) < 0.5:
-                        friction = (0,0)
-                        v = (0,v[1])
-
                     node.set_velocity((
                         v[0],
                         v[1] * self.__bounce_damping * -1
@@ -424,10 +464,6 @@ class Simulation:
                 # right wall
                 elif x > disp_w:
                     friction = (0, -Utils.num_sign(v[1]) * node.force_sum()[0] * self.__friction_coeff)
-                    if abs(v[1]) < 0.5:
-                        friction = (0,0)
-                        v = (v[0],0)
-
                     node.set_velocity((
                         v[0] * self.__bounce_damping * -1,
                         v[1]
@@ -439,10 +475,6 @@ class Simulation:
                 # left wall
                 elif x < 0:
                     friction = (0, -Utils.num_sign(v[1]) * node.force_sum()[0] * self.__friction_coeff)
-                    if abs(v[1]) < 0.5:
-                        friction = (0,0)
-                        v = (v[0],0)
-
                     node.set_velocity((
                         -1 * v[0] * self.__bounce_damping,
                         v[1]
@@ -463,16 +495,42 @@ class Simulation:
 
         self.collision_detection()
         for b in self.__bodies:
-            b.advance_physics(PhysConsts.time_step)
+            b.advance_physics()
 
         self.__redraw_canvas()
+
+    def __node_clicked(self):
+        click_pos = pygame.mouse.get_pos()
+        r = self.__node_r * self.__meter_in_pixels
+
+        for b in self.__bodies:
+            for n in b.nodes:
+                x,y = n.position
+                x *= self.__meter_in_pixels
+                y *= self.__meter_in_pixels
+
+                if (click_pos[0] - r * 2 <= x <= click_pos[0] + r * 2
+                and click_pos[1] - r * 2 <= y <= click_pos[1] + r * 2):
+                    self.__dragged_node = n
+                    self.__is_dragging = True
+                    print("node clicked")
+                    return
+
+        self.__is_dragging = False
+        self.__dragged_node = None
+
+    def __drag_node(self):
+        x, y = pygame.mouse.get_pos()
+        x /= self.__meter_in_pixels
+        y /= self.__meter_in_pixels
+        self.__dragged_node.set_velocity((0,0))
+        self.__dragged_node.set_position((x,y))
+
 
     def __zoom_out(self):
         if self.__meter_in_pixels <= 10:
             return
-
         self.__meter_in_pixels -= 10
-
         self.__disp_size_meters = (
             self.__disp_size_pixels[0] / self.__meter_in_pixels,
             self.__disp_size_pixels[1] / self.__meter_in_pixels
@@ -483,9 +541,7 @@ class Simulation:
     def __zoom_in(self):
         if self.__meter_in_pixels >= 200:
             return
-
         self.__meter_in_pixels += 10
-
         self.__disp_size_meters = (
             self.__disp_size_pixels[0] / self.__meter_in_pixels,
             self.__disp_size_pixels[1] / self.__meter_in_pixels
@@ -499,7 +555,6 @@ class Simulation:
                 pygame.quit()
                 sys.exit()
 
-
             k = pygame.key.get_pressed()
             if event.type == pygame.KEYDOWN:
                 if k[pygame.K_q] == True:
@@ -510,6 +565,16 @@ class Simulation:
                     self.__is_paused = True if self.__is_paused == False else False
                     if self.__is_paused == True: print("paused. [SPACE]")
                     else: print(">>")
+
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                m = pygame.mouse.get_pressed()
+                if m[0]:
+                    self.__is_dragging = True
+            elif event.type == pygame.MOUSEBUTTONUP:
+                m = pygame.mouse.get_pressed()
+                if not m[0]:
+                    self.__is_dragging = False
+                    self.__dragged_node = None
 
             if k[pygame.K_MINUS] == True:
                 if self.__time_scale > 0.01:
@@ -527,24 +592,50 @@ class Simulation:
             if k[pygame.K_UP] == True:
                 self.__zoom_in()
 
-    def auto_run(self, time_scale:float=1) -> None:
+    def __update_highlighted_node(self):
+        mp = pygame.mouse.get_pos()
+        r = self.__node_r * self.__meter_in_pixels
+        for b in self.__bodies:
+            for n in b.nodes:
+                x,y = n.position
+                x *= self.__meter_in_pixels
+                y *= self.__meter_in_pixels
+                if (mp[0] - r * 2 < x < mp[0] + r * 2
+                and mp[1] - r * 2 < y < mp[1] + r * 2):
+                    self.__highlighted_node = n
+                    return
+
+        self.__highlighted_node = None
+
+    def auto_run(self) -> None:
         """Loop for advancing the simulation automatically with time scale"""
         self.__time_scale = round(self.__time_scale, 3)
         is_first_loop = True
+
+        frame_start_time = time()
+
         while True:
-            frame_start_time = time()
+            frame_end_time = time()
+            time_spent = frame_end_time - frame_start_time
+            frame_interval = PhysConsts.time_step / self.__time_scale
 
             self.__handle_pygame_events()
+            self.__update_highlighted_node()
 
-            if self.__is_paused == False:
+            if self.__is_paused == True and time_spent >= frame_interval:
+                frame_start_time = time()
+                time_target_deviation = frame_interval - time_spent
+                if time_target_deviation < -0.001:
+                    print(f"frame {round(abs(time_target_deviation), 5)} seconds behind")
+
                 self.advance_simulation()
-                frame_end_time = time()
-                time_spent = frame_end_time - frame_start_time
-                wait = PhysConsts.time_step / self.__time_scale - time_spent
-                if wait < -0.01:
-                    print(f"simulation cannot keep up! ({round(abs(wait), 5)} seconds behind)")
-                elif wait >= 0:
-                    sleep(wait)
+
+            if self.__is_dragging == True:
+                if self.__dragged_node == None:
+                    self.__node_clicked()
+
+                if self.__dragged_node != None:
+                    self.__drag_node()
 
             # Pause on the first loop i.e. immediately when the simulation is started.
             if is_first_loop== True:
@@ -554,11 +645,18 @@ class Simulation:
 
 
     def __draw_nodes(self, body:SoftBody):
-        w, h = self.__disp_size_pixels
         for node in body.nodes:
             x, y = node.position
             x = x * self.__meter_in_pixels
             y = y * self.__meter_in_pixels
+
+            if self.__highlighted_node == node:
+                pygame.draw.circle(
+                    self.__display,
+                    (100,200,200),
+                    (x, y),
+                    int(self.__node_r * self.__meter_in_pixels * 2)
+                )
 
             pygame.draw.circle(
                 self.__display,
@@ -568,7 +666,6 @@ class Simulation:
             )
 
     def __draw_edges(self, body:SoftBody):
-        w, h = self.__disp_size_pixels
         for edge in body.edges:
             pos1 = edge.start_node.position
             pos2 = edge.end_node.position
@@ -585,7 +682,7 @@ class Simulation:
                 255
             ) if deform_deformation != 0 else 0
 
-            color = (red, 255 - red, 0)
+            color = (max(0,red), max(0,255-red), 0)
 
             pygame.draw.line(
                 self.__display,
