@@ -1,5 +1,6 @@
 #!/bin/env python3
-from simulator import Simulation, SoftBody, Node, PhysConsts
+from simulator import Simulation
+from softbody import SoftBody, Node
 
 if __name__ == "__main__":
     node_list = [
