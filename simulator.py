@@ -50,7 +50,7 @@ class Simulation:
                     ))
                     node.set_acceleration( (a[0], 0) )
                     node.set_position( (x, disp_h) )
-                    node.update_force("friction", friction)
+                    node.set_force("friction", friction)
 
                 # ceiling
                 elif y < 0:
@@ -61,7 +61,7 @@ class Simulation:
                     ))
                     node.set_acceleration( (a[0], 0) )
                     node.set_position( (x, 0) )
-                    node.update_force("friction", friction)
+                    node.set_force("friction", friction)
 
                 # right wall
                 elif x > disp_w:
@@ -72,7 +72,7 @@ class Simulation:
                     ))
                     node.set_acceleration( (0, a[1]) )
                     node.set_position( (disp_w, y) )
-                    node.update_force("friction", friction)
+                    node.set_force("friction", friction)
 
                 # left wall
                 elif x < 0:
@@ -83,10 +83,10 @@ class Simulation:
                     ))
                     node.set_acceleration( (0, a[1]) )
                     node.set_position( (0, y) )
-                    node.update_force("friction", friction)
+                    node.set_force("friction", friction)
 
                 else:
-                    node.update_force("friction", (0,0))
+                    node.set_force("friction", (0,0))
 
     def add_body(self, body:SoftBody):
         """add a body"""

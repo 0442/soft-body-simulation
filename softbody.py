@@ -23,7 +23,7 @@ class Node:
 
         self.__forces = {}
 
-    def update_force(self, identifier, vector:tuple[float,float]):
+    def set_force(self, identifier, vector:tuple[float,float]):
         self.__forces[identifier] = vector
 
     def remove_force(self, identifier):
@@ -40,39 +40,26 @@ class Node:
 
     def force_sum(self):
         return reduce(
-            lambda a, b: (a[0] + b[0], a[1] + b[1]),
+            vector_sum,
             self.__forces.values(),
-            (0, 0)
         )
 
     def update_state(self):
         mass = self.__mass
         vel = self.__velocity
         pos = self.__position
+        a = self.__acceleration
         force_sum = self.force_sum()
 
-        a = (
-            force_sum[0] / mass,
-            force_sum[1] / mass
-        )
+        new_a = scale_vector(force_sum, 1/mass)
+        avg_a = scale_vector(vector_sum(a, new_a), 1/2)
 
-        new_vel = (
-            vel[0] + a[0] * TIME_STEP,
-            vel[1] + a[1] * TIME_STEP
-        )
-
-        avg_vel = (
-            (vel[0] + new_vel[0]) / 2,
-            (vel[1] + new_vel[1]) / 2
-        )
-
-        new_pos = (
-            pos[0] + avg_vel[0] * TIME_STEP,
-            pos[1] + avg_vel[1] * TIME_STEP
-        )
+        new_vel = vector_sum(vel, scale_vector(avg_a, TIME_STEP))
+        avg_vel = scale_vector(vector_sum(vel, new_vel), 1/2)
+        new_pos = vector_sum(pos, scale_vector(avg_vel, TIME_STEP))
 
         self.__velocity = new_vel
-        self.__acceleration = a
+        self.__acceleration = new_a
         self.__position = new_pos
 
     @property
@@ -121,17 +108,11 @@ class Edge:
             self.__node2.position[0] - self.__node1.position[0],
             self.__node2.position[1] - self.__node1.position[1]
         )
-        distance = sqrt(distance_vect[0]**2 + distance_vect[1]**2)
+        distance = vector_len(distance_vect)
         scale_factor = magnitude/distance if distance != 0 else 0
 
-        force_vect_1 = (
-            distance_vect[0] * scale_factor,
-            distance_vect[1] * scale_factor
-        )
-        force_vect_2 = (
-            force_vect_1[0] * -1,
-            force_vect_1[1] * -1
-        )
+        force_vect_1 = scale_vector(distance_vect, scale_factor)
+        force_vect_2 = scale_vector(force_vect_1, -1)
 
         return force_vect_1, force_vect_2
 
@@ -266,8 +247,8 @@ class SoftBody:
 
             force1, force2 = edge.calculate_spring_force()
 
-            node1.update_force(edge, force1)
-            node2.update_force(edge, force2)
+            node1.set_force(edge, force1)
+            node2.set_force(edge, force2)
 
             # damping
             d_vel1, d_vel2 = edge.calculate_damping_vectors()
@@ -279,7 +260,7 @@ class SoftBody:
         # add external forces and update nodes
         for node in self.__nodes:
             for name, force in self.__external_forces.items():
-                node.update_force(name, force)
+                node.set_force(name, force)
 
             node.update_state()
 
