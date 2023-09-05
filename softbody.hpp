@@ -247,7 +247,7 @@ public:
             {
                 node1->remove_force(edge_ptr->get_edge_id());
                 node2->remove_force(edge_ptr->get_edge_id());
-                this->edges->remove(*edge_ptr);
+                //this->edges->remove(*edge_ptr);
                 continue;
             }
 

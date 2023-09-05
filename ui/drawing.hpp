@@ -250,9 +250,9 @@ public:
 
     void add_rect(vector<double> pos, vector<double> size, color_t color)
     {
-        SDL_SetRenderDrawColor(rndr, color.r, color.g, color.b, color.a);
+        /*SDL_SetRenderDrawColor(rndr, color.r, color.g, color.b, color.a);
         SDL_Rect r = {pos[0], pos[1], size[0], size[1]};
-        SDL_RenderFillRect(rndr, &r);
+        SDL_RenderFillRect(rndr, &r);*/
     }
 
     void render()

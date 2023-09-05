@@ -189,8 +189,8 @@ public:
         {
             cout << "press enter for next frame\n";
             getchar();
-            s.simulate_next_frame((double)10 / 1000);
-            u.redraw_canvas();
+            this->simulator->simulate_next_frame((double)10 / 1000);
+            this->renderer.redraw_canvas();
         }
     }
 };
