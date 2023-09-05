@@ -6,10 +6,8 @@
 #ifndef SOFTBODY_H
 #define SOFTBODY_H
 
-#define INF numeric_limits<double>::infinity()
 
 using namespace std;
-
 
 class Node {
     private:
@@ -170,19 +168,7 @@ class Edge {
 
             auto r = project_vector(relative_v, relative_p);
             auto damp_v1 = scale_vector(r, this->damping_coef);
-            auto damp_v2 = scale_vector(damp_v1, -1);
-
-            /*
-            auto f = this->calculate_spring_force();
-            double angle1= acos(dot_product(f.first, damp_v1) / (vector_len(f.first) * vector_len(damp_v1)));
-            double angle2 = acos(dot_product(f.second, damp_v2) / (vector_len(f.second) * vector_len(damp_v2)));
-            if (angle1 > 1) {
-                damp_v1 = {0, 0};
-            }
-            if (angle2 > 1) {
-                damp_v2 = {0, 0};
-            }
-            */
+            auto damp_v2 = scale_vector(damp_v1, -1.);
 
             return {damp_v1, damp_v2};
         }
@@ -211,133 +197,154 @@ class Edge {
         }
 };
 
-class SoftBody {
-    private:
-        vector<Node>* nodes;
-        list<Edge>* edges;
-        double edge_deform_at;
-        double edge_deform_coef;
-        double edge_tear_at;
-        map<string, vector<double>> external_forces;
+class SoftBody
+{
+private:
+    const double INF = numeric_limits<double>::infinity();
+    vector<Node> *nodes;
+    list<Edge> *edges;
+    double edge_deform_at;
+    double edge_deform_coef;
+    double edge_tear_at;
+    map<string, vector<double>> external_forces;
 
-    public:
-        SoftBody() = default;
-        SoftBody(vector<Node>* nodes, list<Edge>* edges, double edge_deform_at, double edge_deform_coeff, double edge_tear_at) {
-            this->nodes = nodes;
-            this->edges = edges;
-            this->edge_deform_at = edge_deform_at;
-            this->edge_deform_coef= edge_deform_coef;
-            this->edge_tear_at = edge_tear_at;
-            set_edge_ids();
-        }
-        SoftBody(vector<Node>* nodes, list<Edge>* edges) {
-            this->nodes = nodes;
-            this->edges = edges;
-            this->edge_deform_at = INF;
-            this->edge_deform_coef= INF;
-            this->edge_tear_at = INF;
-            set_edge_ids();
-        }
+public:
+    SoftBody() = default;
+    SoftBody(vector<Node> *nodes, list<Edge> *edges, double edge_deform_at, double edge_deform_coeff, double edge_tear_at)
+    {
+        this->nodes = nodes;
+        this->edges = edges;
+        this->edge_deform_at = edge_deform_at;
+        this->edge_deform_coef = edge_deform_coef;
+        this->edge_tear_at = edge_tear_at;
+        set_edge_ids();
+    }
+    SoftBody(vector<Node> *nodes, list<Edge> *edges)
+    {
+        this->nodes = nodes;
+        this->edges = edges;
+        this->edge_deform_at = INF;
+        this->edge_deform_coef = INF;
+        this->edge_tear_at = INF;
+        set_edge_ids();
+    }
 
-        void set_external_force(string identifier, vector<double> force_vect) {
-            auto r = this->external_forces.emplace(identifier, force_vect);
-        }
+    void set_external_force(string identifier, vector<double> force_vect)
+    {
+        auto r = this->external_forces.emplace(identifier, force_vect);
+    }
 
-        void advance_physics(double time_step) {
-            list<Edge>::iterator edge_ptr;
-            for (edge_ptr = this->edges->begin(); edge_ptr != this->edges->end(); edge_ptr++) {
-                Node* node1 = edge_ptr->get_node1();
-                Node* node2 = edge_ptr->get_node2();
+    void advance_physics(double time_step)
+    {
+        list<Edge>::iterator edge_ptr;
+        for (edge_ptr = this->edges->begin(); edge_ptr != this->edges->end(); edge_ptr++)
+        {
+            Node *node1 = edge_ptr->get_node1();
+            Node *node2 = edge_ptr->get_node2();
 
-                // tear edge
-                if (edge_ptr->get_deformation() > this->edge_tear_at) {
-                    node1->remove_force(edge_ptr->get_edge_id());
-                    node2->remove_force(edge_ptr->get_edge_id());
-                    //this->edges->remove(*edge_ptr);
-                    continue;
-                }
-
-                // deform edge
-                if (edge_ptr->get_deformation() > this->edge_deform_at) {
-                    edge_ptr->set_rest_length(edge_ptr->get_rest_length() + edge_ptr->get_deformation());
-                }
-
-                // update spring f
-                auto f = edge_ptr->calculate_spring_force();
-                node1->set_force(edge_ptr->get_edge_id(), f.first);
-                node2->set_force(edge_ptr->get_edge_id(), f.second);
-
-                // damping
-                auto damp_v = edge_ptr->calculate_damping_vectors();
-                vector<double> vel1 = vector_sum(node1->get_velocity(), damp_v.first);
-                vector<double> vel2 = vector_sum(node2->get_velocity(), damp_v.second);
-                node1->set_velocity(vel1);
-                node2->set_velocity(vel2);
-            }
-
-            vector<Node>::iterator n_ptr;
-            for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++) {
-                for ( auto f : this->external_forces) {
-                    n_ptr->set_force(f.first, f.second);
-                }
-                n_ptr->update_state(time_step);
-            }
-        }
-
-        void add_velocity(vector<double> v_vect) {
-            vector<Node>::iterator n_ptr;
-            for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++) {
-                vector<double> new_v = vector_sum(n_ptr->get_velocity(), v_vect);
-                n_ptr->set_velocity(new_v);
-            }
-        }
-
-        void move_relative(vector<double> transform_vect) {
-            vector<Node>::iterator n_ptr;
-            for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++) {
-                n_ptr->set_position(vector_sum(n_ptr->get_position(), transform_vect));
-            }
-        }
-
-        void move_absolute(vector<double> top_left_pos) {
-            vector<double> obj_top_left = this->nodes->front().get_position();
-
-            vector<Node>::iterator n_ptr;
-            for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++) {
-                vector<double> pos = n_ptr->get_position();
-                obj_top_left[0] = min(pos[0], obj_top_left[0]);
-                obj_top_left[1] = min(pos[1], obj_top_left[1]);
-            }
-            vector<double> transform_vect = vector_sub(obj_top_left, top_left_pos);
-            move_relative(transform_vect);
-
-        }
-
-        void set_edge_ids() {
-            list<Edge>::iterator e_ptr;
-            for (e_ptr = this->edges->begin(); e_ptr != this->edges->end(); e_ptr++)
+            // tear edge
+            if (edge_ptr->get_deformation() > this->edge_tear_at)
             {
-                e_ptr->set_id(gen_id());
+                node1->remove_force(edge_ptr->get_edge_id());
+                node2->remove_force(edge_ptr->get_edge_id());
+                this->edges->remove(*edge_ptr);
+                continue;
             }
+
+            // deform edge
+            if (edge_ptr->get_deformation() > this->edge_deform_at)
+                edge_ptr->set_rest_length(edge_ptr->get_rest_length() + edge_ptr->get_deformation());
+
+            // update spring f
+            auto f = edge_ptr->calculate_spring_force();
+            node1->set_force(edge_ptr->get_edge_id(), f.first);
+            node2->set_force(edge_ptr->get_edge_id(), f.second);
+
+            // damping
+            auto damp_v = edge_ptr->calculate_damping_vectors();
+            vector<double> vel1 = vector_sum(node1->get_velocity(), damp_v.first);
+            vector<double> vel2 = vector_sum(node2->get_velocity(), damp_v.second);
+            node1->set_velocity(vel1);
+            node2->set_velocity(vel2);
         }
 
-        vector<double> get_force(string identifier) {
-            return this->external_forces.at(identifier);
+        vector<Node>::iterator n_ptr;
+        for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++)
+        {
+            for (auto f : this->external_forces)
+            {
+                n_ptr->set_force(f.first, f.second);
+            }
+            n_ptr->update_state(time_step);
         }
+    }
 
-        map<string, vector<double>> get_all_forces(){return this->external_forces;}
-        vector<Node>* get_nodes() {
-            return this->nodes;
+    void add_velocity(vector<double> v_vect)
+    {
+        vector<Node>::iterator n_ptr;
+        for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++)
+        {
+            vector<double> new_v = vector_sum(n_ptr->get_velocity(), v_vect);
+            n_ptr->set_velocity(new_v);
         }
-        list<Edge>* get_edges() {
-            return this->edges;
+    }
+
+    void move_relative(vector<double> transform_vect)
+    {
+        vector<Node>::iterator n_ptr;
+        for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++)
+        {
+            n_ptr->set_position(vector_sum(n_ptr->get_position(), transform_vect));
         }
-        double get_edge_deform_at() {
-            return this->edge_deform_at;
+    }
+
+    void move_absolute(vector<double> top_left_pos)
+    {
+        vector<double> obj_top_left = this->nodes->front().get_position();
+
+        vector<Node>::iterator n_ptr;
+        for (n_ptr = this->nodes->begin(); n_ptr != this->nodes->end(); n_ptr++)
+        {
+            vector<double> pos = n_ptr->get_position();
+            obj_top_left[0] = min(pos[0], obj_top_left[0]);
+            obj_top_left[1] = min(pos[1], obj_top_left[1]);
         }
-        double get_edge_tear_at() {
-            return this->edge_tear_at;
+        vector<double> transform_vect = vector_sub(obj_top_left, top_left_pos);
+        move_relative(transform_vect);
+    }
+
+    void set_edge_ids()
+    {
+        list<Edge>::iterator e_ptr;
+        for (e_ptr = this->edges->begin(); e_ptr != this->edges->end(); e_ptr++)
+        {
+            e_ptr->set_id(gen_id());
         }
+    }
+
+    vector<double> get_force(string identifier) {
+        return this->external_forces.at(identifier);
+    }
+
+    map<string, vector<double>> get_all_forces() {
+        return this->external_forces;
+    }
+
+    vector<Node> *get_nodes() {
+        return this->nodes;
+    }
+
+    list<Edge> *get_edges() {
+        return this->edges;
+    }
+
+    double get_edge_deform_at() {
+        return this->edge_deform_at;
+    }
+
+    double get_edge_tear_at() {
+        return this->edge_tear_at;
+    }
 };
 
 #endif
